@@ -1,9 +1,12 @@
-from litestar import Litestar, get
+import litestar
+from litestar.config.csrf import CSRFConfig
 
 
-@get("/")
+@litestar.get("/")
 async def index() -> str:
     return "Hello, world!"
 
 
-app = Litestar(route_handlers=[index])
+app = litestar.Litestar(
+    route_handlers=[index], csrf_config=CSRFConfig(secret="test-secret")
+)
