@@ -16,12 +16,17 @@ from litestar.logging import LoggingConfig
 from litestar.middleware.session.server_side import ServerSideSessionConfig
 from litestar.stores.file import FileStore
 from litestar.contrib.htmx.request import HTMXRequest
+from litestar.static_files import create_static_files_router
 import pydantic
-
+import utils
 from api import OpenTriviaDB, OpenTriviaQuestion, get_open_trivia_db
+import config
 
-CWD = Path(__file__).parent
 session_config = ServerSideSessionConfig()
+
+
+def on_startup():
+    config.ASSETS_DIR.mkdir(exist_ok=True)
 
 
 class SessionAnswerEntry(pydantic.BaseModel):
@@ -64,6 +69,7 @@ class SessionState(pydantic.BaseModel):
     question: SessionQuestion
     get_at: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
     answers_url: str = "/answers"
+    avatar: utils.Avatar
 
 
 @litestar.get("/")
@@ -76,7 +82,8 @@ async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
             text=question.text,
             correct_answer=question.correct_answer,
             incorrect_answers=question.incorrect_answers,
-        )
+        ),
+        avatar=utils.get_avatar(request.get_session_id()),
     )
     request.set_session(session_data)
 
@@ -112,12 +119,23 @@ async def redirect_to(
     return HXLocation(redirect_to=to, swap="outerHTML")
 
 
+@litestar.websocket_listener("/gameroom")
+async def gameroom(data: dict[str, str], socket: litestar.WebSocket) -> None:
+    pass
+
+
 app = litestar.Litestar(
-    route_handlers=[index, answers, redirect_to],
+    route_handlers=[
+        index,
+        answers,
+        redirect_to,
+        gameroom,
+        create_static_files_router(path="/static", directories=[config.ASSETS_DIR]),
+    ],
     csrf_config=CSRFConfig(secret="test-secret"),
     compression_config=CompressionConfig(backend="gzip"),
     template_config=TemplateConfig(
-        directory=CWD / "templates", engine=JinjaTemplateEngine
+        directory=config.CWD / "templates", engine=JinjaTemplateEngine
     ),
     logging_config=LoggingConfig(
         root={"level": "INFO", "handlers": ["queue_listener"]},
@@ -129,8 +147,9 @@ app = litestar.Litestar(
         log_exceptions="always",
     ),
     middleware=[session_config.middleware],
-    stores={"sessions": FileStore(path=CWD / "sessions")},
+    stores={"sessions": FileStore(path=config.CWD / "sessions")},
     dependencies={
         "trivia_db": litestar.di.Provide(get_open_trivia_db),
     },
+    on_startup=[on_startup],
 )
