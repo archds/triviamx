@@ -1,0 +1,13 @@
+<div class="card">
+  <h2 class="text-center" id="question">{{ question }}</h2>
+  <div class="button-group">
+    {% for answer in answers %} {% include 'answer.html' %} {% endfor %}
+  </div>
+</div>
+<style>
+  .button-group {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-around;
+  }
+</style>

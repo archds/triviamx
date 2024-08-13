@@ -9,15 +9,7 @@
   <body>
     <div class="root">
       <div class="container">
-        <div class="card">
-          <h2 class="title" id="question">Question will be displayed here</h2>
-        </div>
-        <div class="button-group is-horizontal-align">
-          <button class="button" id="answer1">Answer 1</button>
-          <button class="button" id="answer2">Answer 2</button>
-          <button class="button" id="answer3">Answer 3</button>
-          <button class="button" id="answer4">Answer 4</button>
-        </div>
+        {% include 'question.html' %}
       </div>
     </div>
   </body>
@@ -35,6 +27,6 @@
     height: 100vh;
     width: 100vw;
     margin: 0;
-    padding: 0
+    padding: 0;
   }
 </style>
