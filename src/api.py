@@ -1,3 +1,5 @@
+import asyncio
+import datetime
 from typing import Literal
 
 import aiohttp
@@ -20,6 +22,7 @@ class OpenTriviaResponse(pydantic.BaseModel):
 class OpenTriviaDB:
     encoding: Literal["default", "legacy", "url", "base64"] = "default"
     diff_map = {"easy": 0, "medium": 1, "hard": 2}
+    timeout: datetime.timedelta = datetime.timedelta(seconds=5)
 
     def __init__(
         self,
@@ -31,7 +34,10 @@ class OpenTriviaDB:
         self.base_url = base_url
         self.api_path = api_path
 
-        self.session = aiohttp.ClientSession(base_url=self.base_url)
+        self.session = aiohttp.ClientSession(
+            base_url=self.base_url,
+            loop=asyncio.get_event_loop(),
+        )
 
     async def get(
         self,

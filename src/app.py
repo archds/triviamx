@@ -1,3 +1,5 @@
+import asyncio
+import datetime
 import html
 from pathlib import Path
 import random
@@ -20,9 +22,11 @@ from api import OpenTriviaDB, OpenTriviaQuestion, get_open_trivia_db
 CWD = Path(__file__).parent
 session_config = ServerSideSessionConfig()
 
+
 class SessionData(pydantic.BaseModel):
     question: OpenTriviaQuestion
-    
+    get_at: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
+
 
 @litestar.get("/")
 async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
@@ -48,8 +52,6 @@ async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
 @litestar.get("/answer")
 async def answer(request: HTMXRequest, answer: str) -> Template:
     session = SessionData(**request.session)
-    from devtools import debug
-    debug(session)
     is_correct = session.question.correct_answer == answer
 
     return HTMXTemplate(
@@ -65,7 +67,16 @@ async def answer(request: HTMXRequest, answer: str) -> Template:
 
 
 @litestar.get("/redirect-to")
-async def redirect_to(request: HTMXRequest, to: str) -> HXLocation:
+async def redirect_to(
+    request: HTMXRequest,
+    to: str,
+    wait_session_timeout: bool = False,
+) -> HXLocation:
+    if wait_session_timeout:
+        session = SessionData(**request.session)
+        while (datetime.datetime.now() - session.get_at) < OpenTriviaDB.timeout:
+            await asyncio.sleep(0.5)
+
     return HXLocation(redirect_to=to, swap="outerHTML")
 
 
