@@ -3,6 +3,7 @@ import datetime
 import html
 from pathlib import Path
 import random
+from typing import Annotated
 import litestar
 from litestar.config.csrf import CSRFConfig
 from litestar.config.compression import CompressionConfig
@@ -23,45 +24,76 @@ CWD = Path(__file__).parent
 session_config = ServerSideSessionConfig()
 
 
-class SessionData(pydantic.BaseModel):
-    question: OpenTriviaQuestion
+class SessionAnswerEntry(pydantic.BaseModel):
+    text: str
+    button_class: str
+
+
+class SessionQuestion(pydantic.BaseModel):
+    text: str
+    correct_answer: str
+    incorrect_answers: list[str]
+    guess: str | None = None
+
+    @pydantic.computed_field
+    def answers(self) -> list[SessionAnswerEntry]:
+        rnd = random.Random(self.text)
+        answ = self.incorrect_answers + [self.correct_answer]
+        rnd.shuffle(answ)
+        return [
+            SessionAnswerEntry(text=ans, button_class=self.get_button_class(ans))
+            for ans in answ
+        ]
+
+    def get_button_class(self, button_text: str) -> str:
+        default_class = "button"
+
+        if button_text == self.correct_answer and self.guess == self.correct_answer:
+            return default_class + " success bounce"
+        if button_text == self.correct_answer and self.guess:
+            return default_class + " success"
+        if button_text != self.correct_answer and button_text == self.guess:
+            return default_class + " error shake"
+        if button_text != self.correct_answer and self.guess:
+            return default_class + " error"
+
+        return default_class
+
+
+class SessionState(pydantic.BaseModel):
+    question: SessionQuestion
     get_at: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
+    answers_url: str = "/answers"
 
 
 @litestar.get("/")
 async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
     result = await trivia_db.get(amount=1)
     question = result[0]
-    answers = question.incorrect_answers + [question.correct_answer]
-    random.shuffle(answers)
 
-    request.set_session(SessionData(question=question))
-
-    return HTMXTemplate(
-        template_name="index.html",
-        context={
-            "question": html.unescape(question.question),
-            "answers": [html.unescape(a) for a in answers],
-            "answer_url": "/answer",
-            "answer_given": False,
-        },
+    session_data = SessionState(
+        question=SessionQuestion(
+            text=question.text,
+            correct_answer=question.correct_answer,
+            incorrect_answers=question.incorrect_answers,
+        )
     )
+    request.set_session(session_data)
+
+    return HTMXTemplate(template_name="index.html", context=session_data.model_dump())
 
 
+@litestar.get("/answers")
+async def answers(request: HTMXRequest, guess: str) -> Template:
+    from devtools import debug, pprint
 
-@litestar.get("/answer")
-async def answer(request: HTMXRequest, answer: str) -> Template:
-    session = SessionData(**request.session)
-    is_correct = session.question.correct_answer == answer
+    debug(request.session)
+    session = SessionState.model_validate(request.session)
+    session.question.guess = guess
 
     return HTMXTemplate(
-        template_name="answer.html",
-        context={
-            "answer": answer,
-            "highlight": "success" if is_correct else "error shake",
-            "answer_url": "/answer",
-            "answer_given": True,
-        },
+        template_name="answers.html",
+        context=session.model_dump(),
         re_swap="outerHTML",
     )
 
@@ -73,7 +105,7 @@ async def redirect_to(
     wait_session_timeout: bool = False,
 ) -> HXLocation:
     if wait_session_timeout:
-        session = SessionData(**request.session)
+        session = SessionState(**request.session)
         while (datetime.datetime.now() - session.get_at) < OpenTriviaDB.timeout:
             await asyncio.sleep(0.5)
 
@@ -81,7 +113,7 @@ async def redirect_to(
 
 
 app = litestar.Litestar(
-    route_handlers=[index, answer, redirect_to],
+    route_handlers=[index, answers, redirect_to],
     csrf_config=CSRFConfig(secret="test-secret"),
     compression_config=CompressionConfig(backend="gzip"),
     template_config=TemplateConfig(

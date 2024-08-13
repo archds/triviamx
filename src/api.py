@@ -1,6 +1,8 @@
 import asyncio
 import datetime
-from typing import Literal
+import html
+import random
+from typing import Annotated, Literal
 
 import aiohttp
 import pydantic
@@ -9,9 +11,16 @@ import pydantic
 class OpenTriviaQuestion(pydantic.BaseModel):
     type: str
     category: str
-    question: str
+    text: Annotated[str, pydantic.AfterValidator(html.unescape)] = pydantic.Field(
+        validation_alias="question"
+    )
     correct_answer: str
-    incorrect_answers: list[str]
+    incorrect_answers: Annotated[
+        list[str], pydantic.AfterValidator(lambda x: [html.unescape(i) for i in x])
+    ]
+    
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
 
 
 class OpenTriviaResponse(pydantic.BaseModel):

@@ -9,7 +9,10 @@
   <body>
     <div class="root">
       <div class="container">
-        {% include 'question.html' %}
+        <div class="card">
+          <h2 class="text-center" id="question">{{ question.text }}</h2>
+          {% include 'answers.html' %}
+        </div>
       </div>
     </div>
   </body>

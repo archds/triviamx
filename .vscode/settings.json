@@ -4,4 +4,10 @@
       98
     ]
   },
+  "emmet.includeLanguages": {
+    "jinja-html": "html"
+  },
+  "files.associations": {
+    "jinja": "html"
+  }
 }
