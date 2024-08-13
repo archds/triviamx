@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "triviamx"
+version = "0.1.0"
+description = ""
+authors = ["archds <dsalekseev11@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+aiohttp = "^3.10.3"
+litestar = {version = "^2.10.0", extras = ["standard"]}
+msgspec = "^0.18.6"
+
+
+[tool.poetry.group.dev.dependencies]
+pyright = "^1.1.375"
+ruff = "^0.5.7"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
