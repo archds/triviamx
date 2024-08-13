@@ -92,9 +92,6 @@ async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
 
 @litestar.get("/answers")
 async def answers(request: HTMXRequest, guess: str) -> Template:
-    from devtools import debug, pprint
-
-    debug(request.session)
     session = SessionState.model_validate(request.session)
     session.question.guess = guess
 
