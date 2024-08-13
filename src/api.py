@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import html
-import random
 from typing import Annotated, Literal
 
 import aiohttp

@@ -1,9 +1,5 @@
 import asyncio
 import datetime
-import html
-from pathlib import Path
-import random
-from typing import Annotated
 import litestar
 from litestar.config.csrf import CSRFConfig
 from litestar.config.compression import CompressionConfig
@@ -17,9 +13,8 @@ from litestar.middleware.session.server_side import ServerSideSessionConfig
 from litestar.stores.file import FileStore
 from litestar.contrib.htmx.request import HTMXRequest
 from litestar.static_files import create_static_files_router
-import pydantic
-import utils
-from api import OpenTriviaDB, OpenTriviaQuestion, get_open_trivia_db
+import state
+from api import OpenTriviaDB, get_open_trivia_db
 import config
 
 session_config = ServerSideSessionConfig()
@@ -29,61 +24,19 @@ def on_startup():
     config.ASSETS_DIR.mkdir(exist_ok=True)
 
 
-class SessionAnswerEntry(pydantic.BaseModel):
-    text: str
-    button_class: str
-
-
-class SessionQuestion(pydantic.BaseModel):
-    text: str
-    correct_answer: str
-    incorrect_answers: list[str]
-    guess: str | None = None
-
-    @pydantic.computed_field
-    def answers(self) -> list[SessionAnswerEntry]:
-        rnd = random.Random(self.text)
-        answ = self.incorrect_answers + [self.correct_answer]
-        rnd.shuffle(answ)
-        return [
-            SessionAnswerEntry(text=ans, button_class=self.get_button_class(ans))
-            for ans in answ
-        ]
-
-    def get_button_class(self, button_text: str) -> str:
-        default_class = "button"
-
-        if button_text == self.correct_answer and self.guess == self.correct_answer:
-            return default_class + " success bounce"
-        if button_text == self.correct_answer and self.guess:
-            return default_class + " success"
-        if button_text != self.correct_answer and button_text == self.guess:
-            return default_class + " error shake"
-        if button_text != self.correct_answer and self.guess:
-            return default_class + " error"
-
-        return default_class
-
-
-class SessionState(pydantic.BaseModel):
-    question: SessionQuestion
-    get_at: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
-    answers_url: str = "/answers"
-    avatar: utils.Avatar
-
-
 @litestar.get("/")
 async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
     result = await trivia_db.get(amount=1)
     question = result[0]
+    session_id = request.get_session_id()
+    assert session_id
 
-    session_data = SessionState(
-        question=SessionQuestion(
+    session_data = state.GameState(
+        question=state.GameQuestion(
             text=question.text,
             correct_answer=question.correct_answer,
             incorrect_answers=question.incorrect_answers,
         ),
-        avatar=utils.get_avatar(request.get_session_id()),
     )
     request.set_session(session_data)
 
@@ -92,7 +45,7 @@ async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
 
 @litestar.get("/answers")
 async def answers(request: HTMXRequest, guess: str) -> Template:
-    session = SessionState.model_validate(request.session)
+    session = state.GameState.model_validate(request.session)
     session.question.guess = guess
 
     return HTMXTemplate(
@@ -109,7 +62,7 @@ async def redirect_to(
     wait_session_timeout: bool = False,
 ) -> HXLocation:
     if wait_session_timeout:
-        session = SessionState(**request.session)
+        session = state.GameState(**request.session)
         while (datetime.datetime.now() - session.get_at) < OpenTriviaDB.timeout:
             await asyncio.sleep(0.5)
 
