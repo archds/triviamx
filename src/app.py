@@ -24,6 +24,9 @@ import config
 import utils
 
 session_config = ServerSideSessionConfig()
+template_config = TemplateConfig(
+    directory=config.CWD / "templates", engine=JinjaTemplateEngine
+)
 
 
 class ClientSessionData(pydantic.BaseModel):
@@ -31,8 +34,13 @@ class ClientSessionData(pydantic.BaseModel):
     game_session: state.GameSession
 
 
+class ClientSessionMessage(pydantic.BaseModel):
+    guess: str
+
+
 def on_startup():
     config.ASSETS_DIR.mkdir(exist_ok=True)
+    config.STORE_PATH.mkdir(exist_ok=True)
 
 
 @litestar.get("/", status_code=litestar.status_codes.HTTP_302_FOUND)
@@ -84,22 +92,31 @@ async def redirect_to(
     return HXLocation(redirect_to=to, swap="outerHTML")
 
 
-@litestar.websocket_listener("/ws")
+@litestar.websocket_listener("/ws", send_mode="text")
 async def ws(
     data: dict[str, str],
     socket: litestar.WebSocket,
     game_session_id: uuid.UUID,
     session_manager: state.GameSessionManager,
-) -> HTMXTemplate:
+) -> str:
+    msg = ClientSessionMessage.model_validate(data)
     player_session_id = socket.get_session_id()
     assert player_session_id
-    game_session = await session_manager.get_session(game_session_id)
+    game_session = await session_manager.get_session(game_session_id)    
+    
+    await session_manager.set_player_guess(
+        session_id=game_session_id,
+        player_session_id=player_session_id,
+        guess=msg.guess,
+    )
     ctx = ClientSessionData(
         player_session_id=player_session_id,
         game_session=game_session,
     )
 
-    return HTMXTemplate(template_name="answers.html", context=ctx)
+    template = template_config.engine_instance.get_template("answers.html")
+
+    return template.render(**ctx.model_dump())
 
 
 app = litestar.Litestar(
@@ -112,9 +129,7 @@ app = litestar.Litestar(
     ],
     csrf_config=CSRFConfig(secret="test-secret"),
     compression_config=CompressionConfig(backend="gzip"),
-    template_config=TemplateConfig(
-        directory=config.CWD / "templates", engine=JinjaTemplateEngine
-    ),
+    template_config=template_config,
     logging_config=LoggingConfig(
         root={"level": "INFO", "handlers": ["queue_listener"]},
         formatters={
@@ -125,7 +140,7 @@ app = litestar.Litestar(
         log_exceptions="always",
     ),
     middleware=[session_config.middleware],
-    stores={"sessions": FileStore(path=config.CWD / "sessions")},
+    stores={"sessions": FileStore(path=config.STORE_PATH / "client_sessions")},
     dependencies={
         "trivia_db": litestar.di.Provide(get_open_trivia_db),
         "session_manager": litestar.di.Provide(

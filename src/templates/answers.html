@@ -1,20 +1,7 @@
 <div class="button-group" id="answers">
   {% for answer in game_session.current_question.answers %}
-  <button
-    class="{{ answer.button_class }}"
-    hx-get="{{ answers_url }}?guess={{ answer.text }}"
-    hx-target="#answers"
-    hx-trigger="click once"
-  >
-    {{ answer.text }}
-  </button>
-  {% endfor %} {% if game_session.current_question.guess %}
-  <div
-    style="display: none"
-    hx-get="/redirect-to?to=/"
-    hx-trigger="load delay:3s"
-  ></div>
-  {% endif %}
+    {% include 'answer.html' %}
+  {% endfor %}
 </div>
 
 <style>
@@ -74,5 +61,17 @@
     display: flex;
     flex-direction: row;
     justify-content: space-around;
+  }
+  
+  .avatar-mini-block {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 5px;
+  }
+  .avatar-mini-img {
+    max-width: 24px;
+    max-height: 24px;
   }
 </style>

@@ -1,0 +1,16 @@
+<form ws-send id="guess">
+    <div>
+      {% for player in game_session.players %} {% if player.current_guess ==
+      answer.text %}
+      <div class="avatar-mini-block">
+        <div class="avatar-mini-img">
+          <img src="{{ player.avatar.url }}" alt="{{ player.avatar.name }}" />
+        </div>
+      </div>
+      {% endif %} {% endfor %}
+      <button class="{{ answer.button_class }}" hx-target="#guess">
+        {{ answer.text }}
+      </button>
+    </div>
+    <input name="guess" type="hidden" value="{{ answer.text }}" />
+  </form>

@@ -1,8 +1,12 @@
 import datetime
 import random
 import uuid
+import litestar
+import litestar.stores
+import litestar.stores.file
 import pydantic
 from api import OpenTriviaDB
+import config
 import utils
 
 
@@ -54,6 +58,7 @@ class Player(pydantic.BaseModel):
     session_id: str
     nickname: str
     avatar: utils.Avatar
+    current_guess: str | None = None
 
     @classmethod
     def new(cls, session_id: str) -> "Player":
@@ -72,7 +77,7 @@ class GameSession(pydantic.BaseModel):
 
 class GameSessionManager:
     def __init__(self, trivia_db: OpenTriviaDB) -> None:
-        self.game_sessions: dict[uuid.UUID, GameSession] = {}
+        self.store = litestar.stores.file.FileStore(config.STORE_PATH / "game_sessions")
         self.db = trivia_db
 
     async def open_session(self, player_session_id: str) -> GameSession:
@@ -97,12 +102,17 @@ class GameSessionManager:
             players=[player],
         )
 
-        self.game_sessions[session.id] = session
+        await self.save_session(session)
 
         return session
 
     async def get_session(self, session_id: uuid.UUID) -> GameSession:
-        return self.game_sessions[session_id]
+        raw = await self.store.get(str(session_id))
+        assert raw
+        return GameSession.model_validate_json(raw)
+
+    async def save_session(self, session: GameSession) -> None:
+        await self.store.set(str(session.id), session.model_dump_json())
 
     async def join_session(
         self, session_id: uuid.UUID, player_session_id: str
@@ -110,11 +120,30 @@ class GameSessionManager:
         session = await self.get_session(session_id)
         player = Player.new(player_session_id)
         session.players.append(player)
+        await self.save_session(session)
         return session
 
     async def next_question(self, session_id: uuid.UUID) -> GameSession:
         session = await self.get_session(session_id)
         session.current_question = session.question_pool.pop(0)
+        for player in session.players:
+            player.current_guess = None
+
+        await self.save_session(session)
+
+        return session
+
+    async def set_player_guess(
+        self, session_id: uuid.UUID, player_session_id: str, guess: str
+    ) -> GameSession:
+        session = await self.get_session(session_id)
+        for player in session.players:
+            if player.session_id == player_session_id:
+                player.current_guess = guess
+                break
+
+        await self.save_session(session)
+
         return session
 
 
