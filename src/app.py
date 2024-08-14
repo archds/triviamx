@@ -47,7 +47,7 @@ async def room(
     if not game_session:
         return Redirect(path="/")
 
-    data = session.ClientSessionData(
+    data = session.ClientData(
         player_session_id=player_session_id,
         game_session=game_session,
     )
@@ -59,7 +59,6 @@ async def room(
         context=data.model_dump(),
         push_url=f"/{game_session.id}",
     )
-
 
 
 app = litestar.Litestar(
@@ -75,9 +74,7 @@ app = litestar.Litestar(
     logging_config=LoggingConfig(
         root={"level": "INFO", "handlers": ["queue_listener"]},
         formatters={
-            "standard": {
-                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            }
+            "standard": {"format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"}
         },
         log_exceptions="always",
     ),
@@ -94,5 +91,5 @@ app = litestar.Litestar(
         "template_engine": litestar.di.Provide(utils.get_template_engine),
     },
     on_startup=[on_startup],
-    listeners=[session.update_players, session.update_answers_box],
+    listeners=[session.update_players, session.update_answers_box, session.update_player_status],
 )

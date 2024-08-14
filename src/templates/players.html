@@ -1,6 +1,6 @@
 <div id="players">
   {% for player in game_session.active_players %}
-  <div class="avatar-block">
+  <div class="avatar-block" id="player-{{ player.session_id }}">
     <div class="avatar-img">
       <img src="{{ player.avatar.url }}" alt="{{ player.avatar.name }}" />
     </div>
@@ -10,6 +10,8 @@
       {% if player_session_id == player.session_id %}
       <span class="text-grey">(that's you)</span>
       {% endif %}
+      <br />
+      {% include 'player-status.html' %}
     </p>
   </div>
   {% endfor %}

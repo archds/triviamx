@@ -77,6 +77,14 @@ class Player(pydantic.BaseModel):
         avatar = utils.get_avatar(session_id)
         return cls(session_id=session_id, nickname=avatar.name, avatar=avatar)
 
+    @pydantic.computed_field
+    @property
+    def status(self) -> str:
+        if self.current_guess is None:
+            return "thinking"
+
+        return "ready"
+
 
 class GameSession(pydantic.BaseModel):
     id: uuid.UUID = pydantic.Field(default_factory=uuid.uuid4)
@@ -179,6 +187,17 @@ class GameSessionManager:
         session = await self.get_session(session_id)
         player = session.get_player(player_session_id)
         player.current_guess = guess
+
+        await self.save_session(session)
+
+        return session
+
+    async def unset_player_guess(
+        self, session_id: uuid.UUID, player_session_id: str
+    ) -> GameSession:
+        session = await self.get_session(session_id)
+        player = session.get_player(player_session_id)
+        player.current_guess = None
 
         await self.save_session(session)
 
