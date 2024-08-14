@@ -16,6 +16,7 @@ from litestar.static_files import create_static_files_router
 import state
 from api import OpenTriviaDB, get_open_trivia_db
 import config
+import utils
 
 session_config = ServerSideSessionConfig()
 
@@ -37,6 +38,7 @@ async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
             correct_answer=question.correct_answer,
             incorrect_answers=question.incorrect_answers,
         ),
+        avatar=utils.get_avatar(session_id),
     )
     request.set_session(session_data)
 

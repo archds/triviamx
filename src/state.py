@@ -1,7 +1,7 @@
 import datetime
 import random
 import pydantic
-
+import utils
 
 class GameAnswerEntry(pydantic.BaseModel):
     text: str
@@ -44,3 +44,4 @@ class GameState(pydantic.BaseModel):
     question: GameQuestion
     get_at: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
     answers_url: str = "/answers"
+    avatar: utils.Avatar
