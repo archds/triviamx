@@ -15,5 +15,5 @@ AVATARS: Final = [
 ]
 
 
-def get_avatar(session_id: str | None = None) -> Avatar:
+def get_avatar(player_id: str | None = None) -> Avatar:
     return random.choice(AVATARS)

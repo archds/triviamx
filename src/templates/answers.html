@@ -1,5 +1,5 @@
 <div class="button-group" id="answers">
-  {% for answer in question.answers %}
+  {% for answer in game_session.current_question.answers %}
   <button
     class="{{ answer.button_class }}"
     hx-get="{{ answers_url }}?guess={{ answer.text }}"
@@ -8,7 +8,7 @@
   >
     {{ answer.text }}
   </button>
-  {% endfor %} {% if question.guess %}
+  {% endfor %} {% if game_session.current_question.guess %}
   <div
     style="display: none"
     hx-get="/redirect-to?to=/"

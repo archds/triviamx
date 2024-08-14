@@ -13,6 +13,7 @@ from litestar.middleware.session.server_side import ServerSideSessionConfig
 from litestar.stores.file import FileStore
 from litestar.contrib.htmx.request import HTMXRequest
 from litestar.static_files import create_static_files_router
+import pydantic
 import state
 from api import OpenTriviaDB, get_open_trivia_db
 import config
@@ -21,28 +22,30 @@ import utils
 session_config = ServerSideSessionConfig()
 
 
+class ClientSessionData(pydantic.BaseModel):
+    session_id: str
+    game_session: state.GameSession
+
+
 def on_startup():
     config.ASSETS_DIR.mkdir(exist_ok=True)
 
 
 @litestar.get("/")
-async def index(request: litestar.Request, trivia_db: OpenTriviaDB) -> Template:
-    result = await trivia_db.get(amount=1)
-    question = result[0]
+async def index(
+    request: litestar.Request,
+    session_manager: state.GameSessionManager,
+) -> Template:
     session_id = request.get_session_id()
     assert session_id
+    game_session = await session_manager.open_session(session_id)
+    data = ClientSessionData(session_id=session_id, game_session=game_session)
 
-    session_data = state.GameState(
-        question=state.GameQuestion(
-            text=question.text,
-            correct_answer=question.correct_answer,
-            incorrect_answers=question.incorrect_answers,
-        ),
-        avatar=utils.get_avatar(session_id),
+    return HTMXTemplate(
+        template_name="index.html",
+        context=data.model_dump(),
+        push_url=f"/{game_session.id}",
     )
-    request.set_session(session_data)
-
-    return HTMXTemplate(template_name="index.html", context=session_data.model_dump())
 
 
 @litestar.get("/answers")
@@ -102,6 +105,11 @@ app = litestar.Litestar(
     stores={"sessions": FileStore(path=config.CWD / "sessions")},
     dependencies={
         "trivia_db": litestar.di.Provide(get_open_trivia_db),
+        "session_manager": litestar.di.Provide(
+            state.GameSessionManager,
+            use_cache=True,
+            sync_to_thread=True,
+        ),
     },
     on_startup=[on_startup],
 )

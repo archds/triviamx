@@ -11,21 +11,23 @@
       <div class="container">
         <div class="row">
           <div class="col is-horizontal-align">
+            {% for player in game_session.players %}
             <div class="avatar-block">
               <div class="avatar-img">
-                <img src="{{ avatar.url }}" alt="{{ avatar.name }}" />
+                <img src="{{ player.avatar.url }}" alt="{{ player.avatar.name }}" />
               </div>
               <p class="text-center">
-                Anonymous <span class="text-primary">{{ avatar.name }}</span
+                Anonymous <span class="text-primary">{{ player.avatar.name }}</span
                 ><br /><span class="text-grey">(that's you)</span>
               </p>
             </div>
+            {% endfor %}
           </div>
         </div>
         <div class="row">
           <div class="col">
             <div class="card">
-              <h2 class="text-center" id="question">{{ question.text }}</h2>
+              <h2 class="text-center" id="question">{{ game_session.current_question.text }}</h2>
               {% include 'answers.html' %}
             </div>
           </div>
