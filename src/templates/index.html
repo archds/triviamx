@@ -14,10 +14,14 @@
             {% for player in game_session.players %}
             <div class="avatar-block">
               <div class="avatar-img">
-                <img src="{{ player.avatar.url }}" alt="{{ player.avatar.name }}" />
+                <img
+                  src="{{ player.avatar.url }}"
+                  alt="{{ player.avatar.name }}"
+                />
               </div>
               <p class="text-center">
-                Anonymous <span class="text-primary">{{ player.avatar.name }}</span
+                Anonymous
+                <span class="text-primary">{{ player.avatar.name }}</span
                 ><br /><span class="text-grey">(that's you)</span>
               </p>
             </div>
@@ -25,19 +29,9 @@
           </div>
         </div>
         <div class="row">
-          <div class="col">
-            <div class="card">
-              <h2 class="text-center" id="question">{{ game_session.current_question.text }}</h2>
-              {% include 'answers.html' %}
-            </div>
-          </div>
+          <div class="col">{% include 'question.html' %}</div>
         </div>
       </div>
-    </div>
-    <div class="test-ws" hx-ext="ws" ws-connect="/gameroom">
-      <form id="form" ws-send hx-trigger="every 2s">
-        <input name="chat_message" value="wawa" />
-      </form>
     </div>
   </body>
 </html>
