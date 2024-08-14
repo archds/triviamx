@@ -1,15 +1,15 @@
 <div id="players">
-  {% for player in game_session.players %}
+  {% for player in game_session.active_players %}
   <div class="avatar-block">
     <div class="avatar-img">
       <img src="{{ player.avatar.url }}" alt="{{ player.avatar.name }}" />
     </div>
     <p class="text-center">
       Anonymous
-      <span class="text-primary">{{ player.avatar.name }}</span><br /><span
-        class="text-grey"
-        >(that's you)</span
-      >
+      <span class="text-primary">{{ player.avatar.name }}</span><br />
+      {% if player_session_id == player.session_id %}
+      <span class="text-grey">(that's you)</span>
+      {% endif %}
     </p>
   </div>
   {% endfor %}
@@ -26,5 +26,9 @@
     flex-direction: column;
     justify-content: center;
     align-items: center;
+  }
+  #players {
+    display: flex;
+    justify-content: space-around;
   }
 </style>

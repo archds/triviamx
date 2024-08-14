@@ -1,5 +1,5 @@
 <div id="answer-block-{{ answer.id }}">
-  {% for player in game_session.players %} {% if player.current_guess ==
+  {% for player in game_session.active_players %} {% if player.current_guess ==
   answer.id %}
   <div class="avatar-mini-block">
     <div class="avatar-mini-img">
@@ -10,12 +10,12 @@
   <button class="{{ answer.button_class }}" id="button-{{ answer.id }}">
     {{ answer.text }}
   </button>
-  <input
+  <form
+    id="{{ answer.id }}"
     ws-send
     hx-trigger="click from:#button-{{ answer.id }}"
-    id="{{ answer.id }}"
-    name="SetGuess"
-    type="hidden"
-    value="{{ answer.id }}"
-  />
+  >
+    <input name="Command" type="hidden" value="SetGuess" />
+    <input name="Value" type="hidden" value="{{ answer.id }}" />
+  </form>
 </div>

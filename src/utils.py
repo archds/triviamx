@@ -28,3 +28,7 @@ async def get_player_session_id(request: litestar.Request | litestar.WebSocket) 
         raise ValueError("Session ID not found")
 
     return session_id
+
+
+async def get_template_engine():
+    return config.template_config.engine_instance

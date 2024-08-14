@@ -70,6 +70,7 @@ class Player(pydantic.BaseModel):
     nickname: str
     avatar: utils.Avatar
     current_guess: str | None = None
+    active: bool = True
 
     @classmethod
     def new(cls, session_id: str) -> "Player":
@@ -85,10 +86,18 @@ class GameSession(pydantic.BaseModel):
     answers_url: str = "/answers"
     players: list[Player] = pydantic.Field(default_factory=list)
 
+    @pydantic.computed_field
+    @property
+    def active_players(self) -> list[Player]:
+        return [player for player in self.players if player.active]
+
     def get_player(self, player_session_id: str) -> Player:
-        return next(
-            player for player in self.players if player.session_id == player_session_id
-        )
+        return next(player for player in self.players if player.session_id == player_session_id)
+
+    def remove_player(self, player_session_id: str) -> None:
+        for player in self.players:
+            if player.session_id == player_session_id:
+                player.active = False
 
 
 class GameSessionManager:
@@ -128,23 +137,29 @@ class GameSessionManager:
         return GameSession.model_validate_json(raw)
 
     async def save_session(self, session: GameSession) -> None:
+        await self.store.delete(str(session.id))
         await self.store.set(str(session.id), session.model_dump_json())
 
-
-    async def join_session(
-        self, session_id: uuid.UUID, player_session_id: str
-    ) -> GameSession:
+    async def join_session(self, session_id: uuid.UUID, player_session_id: str) -> GameSession:
         session = await self.get_session(session_id)
-        player = Player.new(player_session_id)
-        session.players.append(player)
+        player_ids = [player.session_id for player in session.players]
+
+        if player_session_id in player_ids:
+            player = session.get_player(player_session_id)
+            if not player.active:
+                player.active = True
+
+        else:
+            player = Player.new(player_session_id)
+            session.players.append(player)
+
         await self.save_session(session)
+
         return session
 
     async def leave_session(self, session_id: uuid.UUID, player_session_id: str) -> GameSession:
         session = await self.get_session(session_id)
-        session.players = [
-            player for player in session.players if player.session_id != player_session_id
-        ]
+        session.remove_player(player_session_id)
         await self.save_session(session)
         return session
 
@@ -162,10 +177,8 @@ class GameSessionManager:
         self, session_id: uuid.UUID, player_session_id: str, guess: str
     ) -> GameSession:
         session = await self.get_session(session_id)
-        for player in session.players:
-            if player.session_id == player_session_id:
-                player.current_guess = guess
-                break
+        player = session.get_player(player_session_id)
+        player.current_guess = guess
 
         await self.save_session(session)
 

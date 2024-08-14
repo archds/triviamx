@@ -1,5 +1,3 @@
-import asyncio
-import datetime
 import uuid
 
 import config
@@ -9,13 +7,11 @@ import litestar.events
 import litestar.handlers
 import litestar.status_codes
 import session
-import state
 import utils
-from api import OpenTriviaDB, get_open_trivia_db
+from api import get_open_trivia_db
 from litestar.config.compression import CompressionConfig
 from litestar.config.csrf import CSRFConfig
-from litestar.contrib.htmx.request import HTMXRequest
-from litestar.contrib.htmx.response import HTMXTemplate, HXLocation
+from litestar.contrib.htmx.response import HTMXTemplate
 from litestar.logging import LoggingConfig
 from litestar.response import Redirect, Template
 from litestar.static_files import create_static_files_router
@@ -30,7 +26,7 @@ def on_startup():
 @litestar.get("/", status_code=litestar.status_codes.HTTP_302_FOUND)
 async def index(
     request: litestar.Request,
-    session_manager: state.GameSessionManager,
+    session_manager: session.GameSessionManager,
 ) -> Redirect:
     session_id = request.get_session_id()
     assert session_id
@@ -44,7 +40,7 @@ async def room(
     request: litestar.Request,
     game_session_id: uuid.UUID,
     player_session_id: str,
-    session_manager: state.GameSessionManager,
+    session_manager: session.GameSessionManager,
 ) -> Template | Redirect:
     game_session = await session_manager.get_session(game_session_id)
 
@@ -65,24 +61,10 @@ async def room(
     )
 
 
-@litestar.get("/redirect-to")
-async def redirect_to(
-    request: HTMXRequest,
-    to: str,
-    wait_session_timeout: bool = False,
-) -> HXLocation:
-    if wait_session_timeout:
-        session = state.GameState(**request.session)
-        while (datetime.datetime.now() - session.get_at) < OpenTriviaDB.timeout:
-            await asyncio.sleep(0.5)
-
-    return HXLocation(redirect_to=to, swap="outerHTML")
-
 
 app = litestar.Litestar(
     route_handlers=[
         index,
-        redirect_to,
         room,
         create_static_files_router(path="/static", directories=[config.ASSETS_DIR]),
         session.GameSessionHandler,
@@ -104,12 +86,13 @@ app = litestar.Litestar(
     dependencies={
         "trivia_db": litestar.di.Provide(get_open_trivia_db),
         "session_manager": litestar.di.Provide(
-            state.GameSessionManager,
+            session.GameSessionManager,
             use_cache=True,
             sync_to_thread=True,
         ),
         "player_session_id": litestar.di.Provide(utils.get_player_session_id),
+        "template_engine": litestar.di.Provide(utils.get_template_engine),
     },
     on_startup=[on_startup],
-    listeners=[session.update_players],
+    listeners=[session.update_players, session.update_answers_box],
 )
