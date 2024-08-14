@@ -1,0 +1,30 @@
+<div id="players">
+  {% for player in game_session.players %}
+  <div class="avatar-block">
+    <div class="avatar-img">
+      <img src="{{ player.avatar.url }}" alt="{{ player.avatar.name }}" />
+    </div>
+    <p class="text-center">
+      Anonymous
+      <span class="text-primary">{{ player.avatar.name }}</span><br /><span
+        class="text-grey"
+        >(that's you)</span
+      >
+    </p>
+  </div>
+  {% endfor %}
+</div>
+
+<style>
+  .avatar-img {
+    max-width: 128px;
+    max-height: 128px;
+  }
+  .avatar-block {
+    margin-bottom: 32px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+</style>

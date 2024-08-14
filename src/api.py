@@ -17,7 +17,7 @@ class OpenTriviaQuestion(pydantic.BaseModel):
     incorrect_answers: Annotated[
         list[str], pydantic.AfterValidator(lambda x: [html.unescape(i) for i in x])
     ]
-    
+
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
 

@@ -1,4 +1,4 @@
-<div class="card" ws-connect="/ws?game_session_id={{ game_session.id }}" hx-ext="ws">
+<div class="card">
     <h2 class="text-center" id="question">{{ game_session.current_question.text }}</h2>
     {% include 'answers.html' %}
   </div>

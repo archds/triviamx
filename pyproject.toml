@@ -25,3 +25,30 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 line-length = 98
+lint.select = [
+  "E",
+  "F",
+  "I",
+  "T20",
+  "W",
+  "N",
+  "YTT",
+  "DJ",
+  "ISC",
+  "ICN",
+  "RSE",
+  "PTH",
+  "C4",
+  "ISC",
+  "ICN",
+  "PIE",
+  "SIM",
+  "TCH",
+  "TD",
+  "FIX",
+  "PD",
+  "PLE",
+  "UP",
+  "TID",
+  "B011",
+]

@@ -1,16 +1,19 @@
 import datetime
+import hashlib
 import random
 import uuid
+
+import config
 import litestar
 import litestar.stores
 import litestar.stores.file
 import pydantic
-from api import OpenTriviaDB
-import config
 import utils
+from api import OpenTriviaDB
 
 
 class GameAnswerEntry(pydantic.BaseModel):
+    id: str
     text: str
     button_class: str
 
@@ -23,13 +26,18 @@ class GameQuestion(pydantic.BaseModel):
     get_at: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
 
     @pydantic.computed_field
+    @property
     def answers(self) -> list[GameAnswerEntry]:
         rnd = random.Random(self.text)
-        answ = self.incorrect_answers + [self.correct_answer]
-        rnd.shuffle(answ)
+        answers = self.incorrect_answers + [self.correct_answer]
+        rnd.shuffle(answers)
         return [
-            GameAnswerEntry(text=ans, button_class=self.get_button_class(ans))
-            for ans in answ
+            GameAnswerEntry(
+                id=hashlib.md5(ans.encode()).hexdigest(),
+                text=ans,
+                button_class=self.get_button_class(ans),
+            )
+            for ans in answers
         ]
 
     def get_button_class(self, button_text: str) -> str:
@@ -45,6 +53,9 @@ class GameQuestion(pydantic.BaseModel):
             return default_class + " error"
 
         return default_class
+
+    def get_answer_by_id(self, answer_id: str) -> GameAnswerEntry:
+        return next(answer for answer in self.answers if answer.id == answer_id)
 
 
 class GameState(pydantic.BaseModel):
@@ -72,7 +83,12 @@ class GameSession(pydantic.BaseModel):
     question_pool: list[GameQuestion]
     started: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
     answers_url: str = "/answers"
-    players: list[Player]
+    players: list[Player] = pydantic.Field(default_factory=list)
+
+    def get_player(self, player_session_id: str) -> Player:
+        return next(
+            player for player in self.players if player.session_id == player_session_id
+        )
 
 
 class GameSessionManager:
@@ -83,7 +99,6 @@ class GameSessionManager:
     async def open_session(self, player_session_id: str) -> GameSession:
         questions = await self.db.get(amount=10)
         current_question = questions.pop(0)
-        player = Player.new(player_session_id)
 
         session = GameSession(
             current_question=GameQuestion(
@@ -99,7 +114,6 @@ class GameSessionManager:
                 )
                 for question in questions
             ],
-            players=[player],
         )
 
         await self.save_session(session)
@@ -108,11 +122,14 @@ class GameSessionManager:
 
     async def get_session(self, session_id: uuid.UUID) -> GameSession:
         raw = await self.store.get(str(session_id))
-        assert raw
+        if not raw:
+            raise ValueError("Session not found")
+
         return GameSession.model_validate_json(raw)
 
     async def save_session(self, session: GameSession) -> None:
         await self.store.set(str(session.id), session.model_dump_json())
+
 
     async def join_session(
         self, session_id: uuid.UUID, player_session_id: str
@@ -120,6 +137,14 @@ class GameSessionManager:
         session = await self.get_session(session_id)
         player = Player.new(player_session_id)
         session.players.append(player)
+        await self.save_session(session)
+        return session
+
+    async def leave_session(self, session_id: uuid.UUID, player_session_id: str) -> GameSession:
+        session = await self.get_session(session_id)
+        session.players = [
+            player for player in session.players if player.session_id != player_session_id
+        ]
         await self.save_session(session)
         return session
 
