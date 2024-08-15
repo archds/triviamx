@@ -12,7 +12,7 @@
     ws-send
     hx-trigger="click from:#button-{{ answer.id }}"
   >
-    {% if current_player and current_player.current_guess %}
+    {% if current_player and current_player.current_guess and current_player.current_guess == answer.id %}
     <input name="Command" type="hidden" value="UnsetGuess" />
     {% else %}
     <input name="Command" type="hidden" value="SetGuess" />
