@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="htmx-config" content='{"defaultSwapDelay":"500"}' />
     <link rel="stylesheet" href="https://unpkg.com/chota@latest" />
     <title>Document</title>
   </head>
@@ -14,9 +15,7 @@
     >
       <div class="container">
         <div class="row">
-          <div class="col">
-            {% include 'players.html' %}
-          </div>
+          <div class="col">{% include 'players.html' %}</div>
         </div>
         <div class="row">
           <div class="col">{% include 'question.html' %}</div>
@@ -31,6 +30,9 @@
   body {
     overflow: hidden; /* disable scroll */
     height: 100vh; /* set body height to screen height */
+  }
+  progress {
+    width: 100%;
   }
   .root {
     display: flex;

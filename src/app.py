@@ -66,7 +66,7 @@ app = litestar.Litestar(
         index,
         room,
         create_static_files_router(path="/static", directories=[config.ASSETS_DIR]),
-        session.GameSessionHandler,
+        session.GameWebsocketListener,
     ],
     csrf_config=CSRFConfig(secret="test-secret"),
     compression_config=CompressionConfig(backend="gzip"),
@@ -91,5 +91,6 @@ app = litestar.Litestar(
         "template_engine": litestar.di.Provide(utils.get_template_engine),
     },
     on_startup=[on_startup],
-    listeners=[session.update_players, session.update_answers_box, session.update_player_status],
+    listeners=session.LISTENERS,
+    websocket_class=session.GameWebsocket,
 )

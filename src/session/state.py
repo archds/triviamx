@@ -19,6 +19,7 @@ class GameAnswerEntry(pydantic.BaseModel):
 
 
 class GameQuestion(pydantic.BaseModel):
+    id: str
     text: str
     correct_answer: str
     incorrect_answers: list[str]
@@ -93,6 +94,7 @@ class GameSession(pydantic.BaseModel):
     started: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
     answers_url: str = "/answers"
     players: list[Player] = pydantic.Field(default_factory=list)
+    timer: int = 0
 
     @pydantic.computed_field
     @property
@@ -107,6 +109,11 @@ class GameSession(pydantic.BaseModel):
             if player.session_id == player_session_id:
                 player.active = False
 
+    @pydantic.computed_field
+    @property
+    def all_guessed(self) -> bool:
+        return all(player.current_guess is not None for player in self.players if player.active)
+
 
 class GameSessionManager:
     def __init__(self, trivia_db: OpenTriviaDB) -> None:
@@ -119,12 +126,14 @@ class GameSessionManager:
 
         session = GameSession(
             current_question=GameQuestion(
+                id=hashlib.md5(current_question.text.encode()).hexdigest(),
                 text=current_question.text,
                 correct_answer=current_question.correct_answer,
                 incorrect_answers=current_question.incorrect_answers,
             ),
             question_pool=[
                 GameQuestion(
+                    id=hashlib.md5(question.text.encode()).hexdigest(),
                     text=question.text,
                     correct_answer=question.correct_answer,
                     incorrect_answers=question.incorrect_answers,

@@ -1,5 +1,7 @@
+import asyncio
 import typing
 import uuid
+from collections import defaultdict
 
 import config
 import litestar.events
@@ -8,6 +10,16 @@ import pydantic
 import utils
 
 import session.state as state
+
+
+class GameWebsocket(litestar.WebSocket):
+    async def send_template(self, template_name: str, context: dict | pydantic.BaseModel) -> None:
+        if isinstance(context, pydantic.BaseModel):
+            context = context.model_dump()
+
+        template = config.template_config.engine_instance.get_template(template_name)
+        rendered = template.render(context)
+        await self.send_text(rendered)
 
 
 class ClientData(pydantic.BaseModel):
@@ -38,62 +50,74 @@ PlayerGuessUnsetEvent = "guess-unset"
 
 
 @litestar.events.listener(PlayerJoinedEvent, PlayerLeftEvent)
-async def update_players(game_session: state.GameSession):
-    for socket in GameSessionHandler.sockets:
-        player_session_id = await utils.get_player_session_id(socket)
-
-        data = ClientData(
-            player_session_id=player_session_id,
-            game_session=game_session,
-        )
-
-        template = config.template_config.engine_instance.get_template("players.html")
-        rendered = template.render(**data.model_dump())
-        await socket.send_text(rendered)
+async def update_players_after_join(
+    game_session: state.GameSession,
+    sockets: list[GameWebsocket],
+    session_manager: state.GameSessionManager,
+):
+    for socket in sockets:
+        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
+        await socket.send_template("players.html", data)
 
 
 @litestar.events.listener(PlayerGuessSetEvent, PlayerGuessUnsetEvent)
-async def update_player_status(game_session: state.GameSession):
-    for socket in GameSessionHandler.sockets:
-        player_session_id = await utils.get_player_session_id(socket)
-
-        data = ClientData(
-            player_session_id=player_session_id,
-            game_session=game_session,
-        )
-
-        template = config.template_config.engine_instance.get_template("player-status.html")
-        rendered = template.render(player=data.current_player)
-        await socket.send_text(rendered)
+async def update_player_status_after_guess(
+    game_session: state.GameSession,
+    sockets: list[GameWebsocket],
+    session_manager: state.GameSessionManager,
+):
+    for socket in sockets:
+        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
+        await socket.send_template("players.html", data)
 
 
-@litestar.events.listener(
-    PlayerGuessSetEvent,
-    PlayerGuessUnsetEvent,
-    PlayerLeftEvent,
-    PlayerJoinedEvent,
-)
-async def update_answers_box(game_session: state.GameSession):
-    for socket in GameSessionHandler.sockets:
-        player_session_id = await utils.get_player_session_id(socket)
+@litestar.events.listener(PlayerGuessSetEvent)
+async def next_question_if_all_guessed(
+    game_session: state.GameSession,
+    sockets: list[GameWebsocket],
+    session_manager: state.GameSessionManager,
+):
+    if game_session.all_guessed:
+        await asyncio.sleep(3)
+        game_session = await session_manager.get_session(game_session.id)
 
-        data = ClientData(
-            player_session_id=player_session_id,
-            game_session=game_session,
-        )
+        if game_session.all_guessed:
+            game_session = await session_manager.next_question(game_session.id)
 
-        template = config.template_config.engine_instance.get_template("answers.html")
-        rendered = template.render(**data.model_dump())
-        await socket.send_text(rendered)
+            for socket in sockets:
+                data = await GameWebsocketListener.get_client_data_from_socket(
+                    game_session, socket
+                )
+                await socket.send_template("question.html", data)
 
 
-class GameSessionHandler(litestar.handlers.WebsocketListener):
+@litestar.events.listener(PlayerGuessSetEvent, PlayerGuessUnsetEvent)
+async def update_answers_after_guess(
+    game_session: state.GameSession,
+    sockets: list[GameWebsocket],
+    session_manager: state.GameSessionManager,
+):
+    for socket in sockets:
+        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
+        await socket.send_template("answers.html", data)
+
+
+LISTENERS = [
+    update_players_after_join,
+    update_player_status_after_guess,
+    next_question_if_all_guessed,
+    update_answers_after_guess,
+]
+
+
+class GameWebsocketListener(litestar.handlers.WebsocketListener):
     path = "/game-session"
-    sockets = []
+    sockets: dict[uuid.UUID, list[GameWebsocket]] = defaultdict(list)
+    timer_tasks = {}
 
     async def on_accept(
         self,
-        socket: litestar.WebSocket,
+        socket: GameWebsocket,
         game_session_id: uuid.UUID,
         player_session_id: str,
         session_manager: state.GameSessionManager,
@@ -102,13 +126,17 @@ class GameSessionHandler(litestar.handlers.WebsocketListener):
             session_id=game_session_id,
             player_session_id=player_session_id,
         )
-
-        self.sockets.append(socket)
-        socket.app.emit(PlayerJoinedEvent, game_session=session)
+        self.sockets[game_session_id].append(socket)
+        socket.app.emit(
+            PlayerJoinedEvent,
+            game_session=session,
+            sockets=self.sockets[game_session_id],
+            session_manager=session_manager,
+        )
 
     async def on_disconnect(
         self,
-        socket: litestar.WebSocket,
+        socket: GameWebsocket,
         game_session_id: uuid.UUID,
         player_session_id: str,
         session_manager: state.GameSessionManager,
@@ -117,13 +145,18 @@ class GameSessionHandler(litestar.handlers.WebsocketListener):
             session_id=game_session_id,
             player_session_id=player_session_id,
         )
-        self.sockets.remove(socket)
-        socket.app.emit(PlayerLeftEvent, game_session=session)
+        self.sockets[game_session_id].remove(socket)
+        socket.app.emit(
+            PlayerLeftEvent,
+            game_session=session,
+            sockets=self.sockets[game_session_id],
+            session_manager=session_manager,
+        )
 
     async def on_receive(
         self,
         data: ClientSessionMessage,
-        socket: litestar.WebSocket,
+        socket: GameWebsocket,
         game_session_id: uuid.UUID,
         player_session_id: str,
         session_manager: state.GameSessionManager,
@@ -136,7 +169,12 @@ class GameSessionHandler(litestar.handlers.WebsocketListener):
                     guess=data["Value"],
                 )
 
-                socket.app.emit(PlayerGuessSetEvent, game_session=session)
+                socket.app.emit(
+                    PlayerGuessSetEvent,
+                    game_session=session,
+                    sockets=self.sockets[game_session_id],
+                    session_manager=session_manager,
+                )
 
             case "UnsetGuess":
                 session = await session_manager.unset_player_guess(
@@ -144,6 +182,21 @@ class GameSessionHandler(litestar.handlers.WebsocketListener):
                     player_session_id=player_session_id,
                 )
 
-                socket.app.emit(PlayerGuessUnsetEvent, game_session=session)
+                socket.app.emit(
+                    PlayerGuessUnsetEvent,
+                    game_session=session,
+                    sockets=self.sockets[game_session_id],
+                    session_manager=session_manager,
+                )
 
         return "Received."
+
+    @staticmethod
+    async def get_client_data_from_socket(
+        game_session: state.GameSession,
+        socket: GameWebsocket,
+    ) -> ClientData:
+        return ClientData(
+            player_session_id=await utils.get_player_session_id(socket),
+            game_session=game_session,
+        )
