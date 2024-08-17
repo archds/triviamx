@@ -4,6 +4,7 @@ import uuid
 from collections import defaultdict
 
 import config
+import litestar.channels
 import litestar.events
 import litestar.handlers
 import pydantic
@@ -39,6 +40,11 @@ class ClientData(pydantic.BaseModel):
             return None
 
 
+class ChannelMessage(pydantic.BaseModel):
+    event_type: str
+    client_data: ClientData
+
+
 ClientSessionCommand = typing.Literal["SetGuess"]
 ClientSessionValue = str
 ClientSessionMessage = dict[str, str]
@@ -47,73 +53,106 @@ PlayerJoinedEvent = "player-joined"
 PlayerLeftEvent = "player-left"
 PlayerGuessSetEvent = "guess-set"
 PlayerGuessUnsetEvent = "guess-unset"
+NextQuestion = "next-question"
 
 
-@litestar.events.listener(PlayerJoinedEvent, PlayerLeftEvent)
-async def update_players_after_join(
+async def update_players(
     game_session: state.GameSession,
-    sockets: list[GameWebsocket],
     session_manager: state.GameSessionManager,
+    socket: GameWebsocket,
+    channels: litestar.channels.ChannelsPlugin,
+    player_session_id: str,
 ):
-    for socket in sockets:
-        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
-        await socket.send_template("players.html", data)
+    data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
+    await socket.send_template("players.html", data)
 
 
-@litestar.events.listener(PlayerGuessSetEvent, PlayerGuessUnsetEvent)
-async def update_player_status_after_guess(
-    game_session: state.GameSession,
-    sockets: list[GameWebsocket],
-    session_manager: state.GameSessionManager,
-):
-    for socket in sockets:
-        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
-        await socket.send_template("players.html", data)
-
-
-@litestar.events.listener(PlayerGuessSetEvent)
 async def next_question_if_all_guessed(
     game_session: state.GameSession,
-    sockets: list[GameWebsocket],
     session_manager: state.GameSessionManager,
+    socket: GameWebsocket,
+    channels: litestar.channels.ChannelsPlugin,
+    player_session_id: str,
 ):
-    if game_session.all_guessed:
-        await asyncio.sleep(3)
-        game_session = await session_manager.get_session(game_session.id)
+    current_question = game_session.current_question
 
-        if game_session.all_guessed:
-            game_session = await session_manager.next_question(game_session.id)
+    if not game_session.all_guessed:
+        return
 
-            for socket in sockets:
-                data = await GameWebsocketListener.get_client_data_from_socket(
-                    game_session, socket
-                )
-                await socket.send_template("question.html", data)
+    await asyncio.sleep(3)
+
+    if game_session.current_question != current_question:
+        return
+
+    game_session = await session_manager.get_session(game_session.id)
+
+    if not game_session.all_guessed:
+        return
+
+    game_session = await session_manager.next_question(game_session.id)
+    message = ChannelMessage(
+        event_type=NextQuestion,
+        client_data=ClientData(
+            player_session_id=player_session_id,
+            game_session=game_session,
+        ),
+    )
+    channels.publish(message.model_dump_json(), str(game_session.id))
 
 
-@litestar.events.listener(PlayerGuessSetEvent, PlayerGuessUnsetEvent)
-async def update_answers_after_guess(
+async def update_answers(
     game_session: state.GameSession,
-    sockets: list[GameWebsocket],
     session_manager: state.GameSessionManager,
+    socket: GameWebsocket,
+    channels: litestar.channels.ChannelsPlugin,
+    player_session_id: str,
 ):
-    for socket in sockets:
-        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
-        await socket.send_template("answers.html", data)
+    data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
+    await socket.send_template("answers.html", data)
 
 
 LISTENERS = [
-    update_players_after_join,
-    update_player_status_after_guess,
+    update_players,
     next_question_if_all_guessed,
-    update_answers_after_guess,
+    update_answers,
 ]
+EVENT_HANDLERS = {
+    PlayerGuessSetEvent: [update_answers, next_question_if_all_guessed, update_players],
+    PlayerGuessUnsetEvent: [update_answers, update_players],
+    PlayerJoinedEvent: [update_players],
+    PlayerLeftEvent: [update_players],
+    NextQuestion: [update_answers, update_players],
+}
+
+
+async def handle_channel_message(
+    socket: GameWebsocket,
+    channels: litestar.channels.ChannelsPlugin,
+    game_session_id: uuid.UUID,
+    session_manager: state.GameSessionManager,
+    player_session_id: str,
+) -> None:
+    async with channels.start_subscription(str(game_session_id)) as subscription:
+        async for message in subscription.iter_events():
+            message = ChannelMessage.model_validate_json(message)
+            handlers = EVENT_HANDLERS[message.event_type]
+            for handler in handlers:
+                asyncio.create_task(
+                    handler(
+                        game_session=message.client_data.game_session,
+                        socket=socket,
+                        session_manager=session_manager,
+                        channels=channels,
+                        player_session_id=player_session_id,
+                    )
+                )
 
 
 class GameWebsocketListener(litestar.handlers.WebsocketListener):
-    path = "/game-session"
+    path = "/game-session/{game_session_id:str}"
     sockets: dict[uuid.UUID, list[GameWebsocket]] = defaultdict(list)
-    timer_tasks = {}
+    next_question_timer_tasks = {}
+    channel_handlers = {}
 
     async def on_accept(
         self,
@@ -121,18 +160,31 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
         game_session_id: uuid.UUID,
         player_session_id: str,
         session_manager: state.GameSessionManager,
+        channels: litestar.channels.ChannelsPlugin,
     ) -> None:
+        self.sockets[game_session_id].append(socket)
+        self.channel_handlers[player_session_id] = asyncio.create_task(
+            handle_channel_message(
+                socket,
+                channels,
+                game_session_id,
+                session_manager,
+                player_session_id,
+            )
+        )
+
         session = await session_manager.join_session(
             session_id=game_session_id,
             player_session_id=player_session_id,
         )
-        self.sockets[game_session_id].append(socket)
-        socket.app.emit(
-            PlayerJoinedEvent,
-            game_session=session,
-            sockets=self.sockets[game_session_id],
-            session_manager=session_manager,
+        message = ChannelMessage(
+            event_type=PlayerJoinedEvent,
+            client_data=ClientData(
+                player_session_id=player_session_id,
+                game_session=session,
+            ),
         )
+        channels.publish(message.model_dump_json(), str(game_session_id))
 
     async def on_disconnect(
         self,
@@ -140,18 +192,22 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
         game_session_id: uuid.UUID,
         player_session_id: str,
         session_manager: state.GameSessionManager,
+        channels: litestar.channels.ChannelsPlugin,
     ) -> None:
+        self.sockets[game_session_id].remove(socket)
+        self.channel_handlers[player_session_id].cancel()
         session = await session_manager.leave_session(
             session_id=game_session_id,
             player_session_id=player_session_id,
         )
-        self.sockets[game_session_id].remove(socket)
-        socket.app.emit(
-            PlayerLeftEvent,
-            game_session=session,
-            sockets=self.sockets[game_session_id],
-            session_manager=session_manager,
+        message = ChannelMessage(
+            event_type=PlayerLeftEvent,
+            client_data=ClientData(
+                player_session_id=player_session_id,
+                game_session=session,
+            ),
         )
+        channels.publish(message.model_dump_json(), str(game_session_id))
 
     async def on_receive(
         self,
@@ -160,6 +216,7 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
         game_session_id: uuid.UUID,
         player_session_id: str,
         session_manager: state.GameSessionManager,
+        channels: litestar.channels.ChannelsPlugin,
     ) -> str:
         match data["Command"]:
             case "SetGuess":
@@ -169,12 +226,15 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
                     guess=data["Value"],
                 )
 
-                socket.app.emit(
-                    PlayerGuessSetEvent,
-                    game_session=session,
-                    sockets=self.sockets[game_session_id],
-                    session_manager=session_manager,
+                message = ChannelMessage(
+                    event_type=PlayerGuessSetEvent,
+                    client_data=ClientData(
+                        player_session_id=player_session_id,
+                        game_session=session,
+                    ),
                 )
+
+                channels.publish(message.model_dump_json(), str(game_session_id))
 
             case "UnsetGuess":
                 session = await session_manager.unset_player_guess(
@@ -182,12 +242,15 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
                     player_session_id=player_session_id,
                 )
 
-                socket.app.emit(
-                    PlayerGuessUnsetEvent,
-                    game_session=session,
-                    sockets=self.sockets[game_session_id],
-                    session_manager=session_manager,
+                message = ChannelMessage(
+                    event_type=PlayerGuessUnsetEvent,
+                    client_data=ClientData(
+                        player_session_id=player_session_id,
+                        game_session=session,
+                    ),
                 )
+
+                channels.publish(message.model_dump_json(), str(game_session_id))
 
         return "Received."
 

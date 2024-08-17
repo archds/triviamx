@@ -91,6 +91,7 @@ app = litestar.Litestar(
         "template_engine": litestar.di.Provide(utils.get_template_engine),
     },
     on_startup=[on_startup],
-    listeners=session.LISTENERS,
+    # listeners=session.LISTENERS,
     websocket_class=session.GameWebsocket,
+    plugins=[config.channels_plugin]
 )
