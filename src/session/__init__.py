@@ -8,14 +8,20 @@ from .state import (
     get_game_session_manager,
 )
 from .websocket import (
+    LISTENERS,
     ClientData,
     GameWebsocket,
     GameWebsocketListener,
+    update_answers,
+    update_players,
 )
 
 __all__ = [
     "ClientData",
     "GameWebsocketListener",
+    "update_answers",
+    "update_players",
+    "LISTENERS",
     "GameWebsocket",
     "GameAnswerEntry",
     "GameQuestion",
