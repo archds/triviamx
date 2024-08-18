@@ -54,75 +54,35 @@ PlayerLeftEvent = "player-left"
 PlayerGuessSetEvent = "guess-set"
 PlayerGuessUnsetEvent = "guess-unset"
 NextQuestion = "next-question"
+RevealAnswers = "reveal-answers"
 
 
-async def update_players(
-    game_session: state.GameSession,
+async def publish_to_channel(
+    channels: litestar.channels.ChannelsPlugin,
+    message: ChannelMessage,
+) -> None:
+    channels.publish(message.model_dump_json(), str(message.client_data.game_session.id))
+
+
+async def reveal_answers_if_all_guessed(
+    game_session_id: uuid.UUID,
     session_manager: state.GameSessionManager,
-    socket: GameWebsocket,
     channels: litestar.channels.ChannelsPlugin,
     player_session_id: str,
 ):
-    data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
-    await socket.send_template("players.html", data)
-
-
-async def next_question_if_all_guessed(
-    game_session: state.GameSession,
-    session_manager: state.GameSessionManager,
-    socket: GameWebsocket,
-    channels: litestar.channels.ChannelsPlugin,
-    player_session_id: str,
-):
-    current_question = game_session.current_question
+    game_session = await session_manager.get_session(game_session_id)
 
     if not game_session.all_guessed:
         return
 
-    await asyncio.sleep(3)
-
-    if game_session.current_question != current_question:
-        return
-
-    game_session = await session_manager.get_session(game_session.id)
-
-    if not game_session.all_guessed:
-        return
-
-    game_session = await session_manager.next_question(game_session.id)
     message = ChannelMessage(
-        event_type=NextQuestion,
+        event_type=RevealAnswers,
         client_data=ClientData(
             player_session_id=player_session_id,
             game_session=game_session,
         ),
     )
-    channels.publish(message.model_dump_json(), str(game_session.id))
-
-
-async def update_answers(
-    game_session: state.GameSession,
-    session_manager: state.GameSessionManager,
-    socket: GameWebsocket,
-    channels: litestar.channels.ChannelsPlugin,
-    player_session_id: str,
-):
-    data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
-    await socket.send_template("answers.html", data)
-
-
-LISTENERS = [
-    update_players,
-    next_question_if_all_guessed,
-    update_answers,
-]
-EVENT_HANDLERS = {
-    PlayerGuessSetEvent: [update_answers, next_question_if_all_guessed, update_players],
-    PlayerGuessUnsetEvent: [update_answers, update_players],
-    PlayerJoinedEvent: [update_players],
-    PlayerLeftEvent: [update_players],
-    NextQuestion: [update_answers, update_players],
-}
+    await publish_to_channel(channels, message)
 
 
 async def handle_channel_message(
@@ -132,20 +92,57 @@ async def handle_channel_message(
     session_manager: state.GameSessionManager,
     player_session_id: str,
 ) -> None:
+    reveal_answer_task = None
+
     async with channels.start_subscription(str(game_session_id)) as subscription:
         async for message in subscription.iter_events():
             message = ChannelMessage.model_validate_json(message)
-            handlers = EVENT_HANDLERS[message.event_type]
-            for handler in handlers:
-                asyncio.create_task(
-                    handler(
-                        game_session=message.client_data.game_session,
-                        socket=socket,
+            tasks = []
+
+            if message.event_type in [PlayerJoinedEvent, PlayerLeftEvent]:
+                tasks.append(socket.send_template("players.html", message.client_data))
+
+            if message.event_type in [PlayerGuessSetEvent, PlayerGuessUnsetEvent]:
+                tasks.append(socket.send_template("players.html", message.client_data))
+                tasks.append(socket.send_template("answers.html", message.client_data))
+
+            if message.event_type == PlayerGuessSetEvent:
+                reveal_answer_task = utils.create_delayed_task(
+                    reveal_answers_if_all_guessed(
+                        game_session_id=game_session_id,
                         session_manager=session_manager,
                         channels=channels,
                         player_session_id=player_session_id,
-                    )
+                    ),
+                    delay=5,
                 )
+
+            if message.event_type == PlayerGuessUnsetEvent and reveal_answer_task:
+                reveal_answer_task.cancel()
+
+            if message.event_type == RevealAnswers:
+                new_message = ChannelMessage(
+                    event_type=NextQuestion,
+                    client_data=message.client_data,
+                )
+                tasks.append(
+                    socket.send_template("answers-revealed.html", new_message.client_data)
+                )
+                tasks.append(
+                    utils.create_delayed_task(publish_to_channel(channels, new_message), delay=5)
+                )
+
+            if message.event_type == NextQuestion:
+                session = await session_manager.next_question(game_session_id)
+                client_data = ClientData(
+                    player_session_id=player_session_id,
+                    game_session=session,
+                )
+
+                tasks.append(socket.send_template("question.html", client_data))
+                tasks.append(socket.send_template("players.html", client_data))
+
+            await asyncio.gather(*tasks)
 
 
 class GameWebsocketListener(litestar.handlers.WebsocketListener):

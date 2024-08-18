@@ -1,5 +1,6 @@
+import asyncio
 import random
-from typing import Final
+from typing import Any, Coroutine, Final
 
 import config
 import litestar
@@ -33,3 +34,9 @@ async def get_player_session_id(request: litestar.Request | litestar.WebSocket) 
 async def get_template_engine():
     return config.template_config.engine_instance
 
+def create_delayed_task(task: Coroutine[Any, Any, Any], delay: int) -> asyncio.Task:
+    async def delayed_task():
+        await asyncio.sleep(delay)
+        await task
+
+    return asyncio.create_task(delayed_task())
