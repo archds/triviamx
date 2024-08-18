@@ -12,15 +12,17 @@ from .websocket import (
     ClientData,
     GameWebsocket,
     GameWebsocketListener,
-    update_answers,
-    update_players,
+    update_answers_after_guess,
+    update_player_status_after_guess,
+    update_players_after_join,
 )
 
 __all__ = [
     "ClientData",
     "GameWebsocketListener",
-    "update_answers",
-    "update_players",
+    "update_players_after_join",
+    "update_answers_after_guess",
+    "update_player_status_after_guess",
     "LISTENERS",
     "GameWebsocket",
     "GameAnswerEntry",

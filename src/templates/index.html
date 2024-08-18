@@ -10,7 +10,7 @@
   <body>
     <div
       class="root fade-in"
-      ws-connect="/game-session/{{ game_session.id }}"
+      ws-connect="/game-session?game_session_id={{ game_session.id }}"
       hx-ext="ws"
     >
       <div class="container">
