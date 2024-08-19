@@ -1,0 +1,9 @@
+<div id="answer-block-{{ answer.id }}">
+  {% if game_session.current_question.correct_answer == answer.text %}
+  <button class="button success bounce" id="button-{{ answer.id }}">
+    {{ answer.text }}
+  </button>
+  {% else %}
+  <button class="button error" id="button-{{ answer.id }}">{{ answer.text }}</button>
+  {% endif %}
+</div>

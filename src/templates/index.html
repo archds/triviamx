@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="htmx-config" content='{"defaultSwapDelay":"500"}' />
     <link rel="stylesheet" href="https://unpkg.com/chota@latest" />
+    <link rel="stylesheet" href="/static/main.css" />
     <title>Document</title>
   </head>
   <body>
@@ -26,45 +27,3 @@
 </html>
 <script src="https://unpkg.com/htmx.org@2.0.2"></script>
 <script src="https://unpkg.com/htmx-ext-ws@2.0.0/ws.js"></script>
-<style>
-  body {
-    overflow: hidden; /* disable scroll */
-    height: 100vh; /* set body height to screen height */
-  }
-  progress {
-    width: 100%;
-  }
-  .root {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    width: 100vw;
-    margin: 0;
-    padding: 0;
-  }
-
-  .fade-in {
-    animation: fadeIn 0.5s ease-in;
-  }
-  .fade-out.htmx-swapping {
-    opacity: 0;
-    transition: opacity 0.5s ease-out;
-  }
-  @keyframes fadeIn {
-    0% {
-      opacity: 0;
-    }
-    100% {
-      opacity: 1;
-    }
-  }
-  @keyframes fadeOut {
-    0% {
-      opacity: 1;
-    }
-    100% {
-      opacity: 0;
-    }
-  }
-</style>

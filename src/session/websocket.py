@@ -1,5 +1,4 @@
 import asyncio
-import typing
 import uuid
 from collections import defaultdict
 
@@ -39,81 +38,66 @@ class ClientData(pydantic.BaseModel):
             return None
 
 
-ClientSessionCommand = typing.Literal["SetGuess"]
-ClientSessionValue = str
 ClientSessionMessage = dict[str, str]
 
 PlayerJoinedEvent = "player-joined"
 PlayerLeftEvent = "player-left"
 PlayerGuessSetEvent = "guess-set"
 PlayerGuessUnsetEvent = "guess-unset"
+RevealAnswers = "reveal-answers"
+NextQuestion = "next-question"
 
 
 @litestar.events.listener(PlayerJoinedEvent, PlayerLeftEvent)
-async def update_players_after_join(
-    game_session: state.GameSession,
-    sockets: list[GameWebsocket],
-    session_manager: state.GameSessionManager,
-):
-    for socket in sockets:
-        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
-        await socket.send_template("players.html", data)
+async def update_players_after_join(game_session: state.GameSession, **kwargs):
+    await GameWebsocketListener.broadcast_template("players.html", game_session)
 
 
 @litestar.events.listener(PlayerGuessSetEvent, PlayerGuessUnsetEvent)
-async def update_player_status_after_guess(
+async def update_player_status_after_guess(game_session: state.GameSession, **kwargs):
+    await GameWebsocketListener.broadcast_template("players.html", game_session)
+
+
+@litestar.events.listener(RevealAnswers)
+async def reveal_answers(game_session: state.GameSession, **kwargs):
+    await GameWebsocketListener.broadcast_template("revealed-answers.html", game_session)
+
+
+@litestar.events.listener(NextQuestion)
+async def next_question(
     game_session: state.GameSession,
-    sockets: list[GameWebsocket],
     session_manager: state.GameSessionManager,
+    **kwargs,
 ):
-    for socket in sockets:
-        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
-        await socket.send_template("players.html", data)
+    game_session = await session_manager.next_question(game_session.id)
 
+    tasks = [
+        GameWebsocketListener.broadcast_template("question.html", game_session),
+        GameWebsocketListener.broadcast_template("players.html", game_session),
+    ]
 
-@litestar.events.listener(PlayerGuessSetEvent)
-async def next_question_if_all_guessed(
-    game_session: state.GameSession,
-    sockets: list[GameWebsocket],
-    session_manager: state.GameSessionManager,
-):
-    if game_session.all_guessed:
-        await asyncio.sleep(3)
-        game_session = await session_manager.get_session(game_session.id)
-
-        if game_session.all_guessed:
-            game_session = await session_manager.next_question(game_session.id)
-
-            for socket in sockets:
-                data = await GameWebsocketListener.get_client_data_from_socket(
-                    game_session, socket
-                )
-                await socket.send_template("question.html", data)
+    await asyncio.gather(*tasks)
 
 
 @litestar.events.listener(PlayerGuessSetEvent, PlayerGuessUnsetEvent)
-async def update_answers_after_guess(
-    game_session: state.GameSession,
-    sockets: list[GameWebsocket],
-    session_manager: state.GameSessionManager,
-):
-    for socket in sockets:
-        data = await GameWebsocketListener.get_client_data_from_socket(game_session, socket)
-        await socket.send_template("answers.html", data)
+async def update_answers_after_guess(game_session: state.GameSession, **kwargs):
+    await GameWebsocketListener.broadcast_template("answers.html", game_session)
 
 
 LISTENERS = [
     update_players_after_join,
     update_player_status_after_guess,
-    next_question_if_all_guessed,
     update_answers_after_guess,
+    reveal_answers,
+    next_question,
 ]
 
 
 class GameWebsocketListener(litestar.handlers.WebsocketListener):
     path = "/game-session"
     sockets: dict[uuid.UUID, list[GameWebsocket]] = defaultdict(list)
-    timer_tasks = {}
+    reveal_answers_tasks = {}
+    next_question_tasks = {}
 
     async def on_accept(
         self,
@@ -130,7 +114,6 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
         socket.app.emit(
             PlayerJoinedEvent,
             game_session=session,
-            sockets=self.sockets[game_session_id],
             session_manager=session_manager,
         )
 
@@ -149,7 +132,6 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
         socket.app.emit(
             PlayerLeftEvent,
             game_session=session,
-            sockets=self.sockets[game_session_id],
             session_manager=session_manager,
         )
 
@@ -172,10 +154,26 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
                 socket.app.emit(
                     PlayerGuessSetEvent,
                     game_session=session,
-                    sockets=self.sockets[game_session_id],
                     session_manager=session_manager,
                 )
 
+                if session.all_guessed:
+                    self.next_question_tasks[game_session_id] = asyncio.create_task(
+                        utils.chain_awaitables(
+                            asyncio.sleep(5),
+                            utils.sync_to_async(socket.app.emit)(
+                                RevealAnswers,
+                                game_session=session,
+                                session_manager=session_manager,
+                            ),
+                            asyncio.sleep(5),
+                            utils.sync_to_async(socket.app.emit)(
+                                NextQuestion,
+                                game_session=session,
+                                session_manager=session_manager,
+                            ),
+                        )
+                    )
             case "UnsetGuess":
                 session = await session_manager.unset_player_guess(
                     session_id=game_session_id,
@@ -185,9 +183,12 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
                 socket.app.emit(
                     PlayerGuessUnsetEvent,
                     game_session=session,
-                    sockets=self.sockets[game_session_id],
                     session_manager=session_manager,
                 )
+                next_question_task = self.next_question_tasks.pop(game_session_id, None)
+
+                if next_question_task:
+                    next_question_task.cancel()
 
         return "Received."
 
@@ -200,3 +201,26 @@ class GameWebsocketListener(litestar.handlers.WebsocketListener):
             player_session_id=await utils.get_player_session_id(socket),
             game_session=game_session,
         )
+
+    @classmethod
+    async def broadcast_template(cls, template_name: str, session: state.GameSession) -> None:
+        for socket in cls.sockets[session.id]:
+            data = await cls.get_client_data_from_socket(session, socket)
+            await socket.send_template(template_name, data)
+
+    @staticmethod
+    def create_emit_after_task(
+        socket: GameWebsocket,
+        event_type: str,
+        game_session: state.GameSession,
+        session_manager: state.GameSessionManager,
+        delay: int,
+    ) -> asyncio.Task:
+        async def _emit():
+            socket.app.emit(
+                event_type,
+                game_session=game_session,
+                session_manager=session_manager,
+            )
+
+        return utils.create_delayed_task(_emit(), delay)
