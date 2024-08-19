@@ -120,7 +120,7 @@ class GameSessionManager:
         self.store = litestar.stores.file.FileStore(config.STORE_PATH / "game_sessions")
         self.db = trivia_db
 
-    async def open_session(self, player_session_id: str) -> GameSession:
+    async def open_session(self) -> GameSession:
         questions = await self.db.get(amount=10)
         current_question = questions.pop(0)
 

@@ -25,19 +25,15 @@ def on_startup():
 
 @litestar.get("/", status_code=litestar.status_codes.HTTP_302_FOUND)
 async def index(
-    request: litestar.Request,
-    session_manager: session.GameSessionManager,
+    session_manager: session.GameSessionManager
 ) -> Redirect:
-    session_id = request.get_session_id()
-    assert session_id
-    game_session = await session_manager.open_session(session_id)
+    game_session = await session_manager.open_session()
 
     return Redirect(path=f"/game/{game_session.id}")
 
 
 @litestar.get("/game/{game_session_id:str}")
 async def room(
-    request: litestar.Request,
     game_session_id: uuid.UUID,
     player_session_id: str,
     session_manager: session.GameSessionManager,
@@ -52,14 +48,12 @@ async def room(
         game_session=game_session,
     )
 
-    request.set_session(data.model_dump())
 
     return HTMXTemplate(
         template_name="index.html",
         context=data.model_dump(),
         push_url=f"/{game_session.id}",
     )
-
 
 app = litestar.Litestar(
     route_handlers=[
